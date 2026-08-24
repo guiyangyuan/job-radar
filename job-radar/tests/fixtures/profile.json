@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "targetRoles": ["AI 应用开发工程师"],
+  "roleAliases": ["AI Engineer"],
+  "recruitmentTypes": ["campus"],
+  "cities": ["上海"],
+  "remotePreference": "neutral",
+  "yearsOfExperience": 0,
+  "graduationDate": "2028-06-30",
+  "education": "bachelor",
+  "skills": ["Python", "Go", "RAG"],
+  "preferredIndustries": ["互联网"],
+  "preferredCompanyTypes": ["民营企业"],
+  "excludedCompanies": [],
+  "excludedKeywords": [],
+  "excludedCities": [],
+  "strictCityFilter": false,
+  "scoreWeights": {
+    "role": 30,
+    "skills": 30,
+    "eligibility": 15,
+    "location": 10,
+    "preference": 10,
+    "freshness": 5
+  },
+  "confirmed": true
+}
