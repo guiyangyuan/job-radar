@@ -5,15 +5,16 @@ from pathlib import Path
 from job_radar_lib.rendering import render_dashboard, write_export
 from job_radar_lib.storage import initialize_workspace, write_json_atomic
 
-from tests.helpers import company_policy, sample_data
+from tests.helpers import company_policy, sample_data, sample_data_with_email
 
 
 class RenderingTests(unittest.TestCase):
-    def test_dashboard_uses_two_tab_company_workbench(self):
+    def test_dashboard_keeps_company_workbench_and_email_tabs(self):
         html = render_dashboard(sample_data(), editable=True, privacy=False)
         self.assertIn('data-tab="recommendations"', html)
         self.assertIn('data-tab="applications"', html)
-        self.assertNotIn('data-tab="overview"', html)
+        self.assertIn('data-tab="email"', html)
+        self.assertIn('data-tab="overview"', html)
         self.assertIn('data-action="application-status"', html)
         self.assertIn("岗位推荐", html)
         self.assertIn("投递进度", html)
@@ -34,16 +35,19 @@ class RenderingTests(unittest.TestCase):
 
     def test_application_editor_only_exposes_status(self):
         html = render_dashboard(sample_data(), editable=True, privacy=False)
+        application_renderer = html.split("function renderApplications()", 1)[1].split(
+            "function showEmailConflict()", 1
+        )[0]
 
         self.assertIn('data-action="application-status"', html)
         self.assertIn("被拒绝", html)
-        self.assertNotIn("面试阶段", html)
-        self.assertNotIn("下一步行动", html)
-        self.assertNotIn("截止时间", html)
-        self.assertNotIn("备注", html)
-        self.assertNotIn("证据链接", html)
-        self.assertNotIn("归档记录", html)
-        self.assertNotIn("查看修改历史", html)
+        self.assertNotIn("面试阶段", application_renderer)
+        self.assertNotIn("下一步行动", application_renderer)
+        self.assertNotIn("截止时间", application_renderer)
+        self.assertNotIn("备注", application_renderer)
+        self.assertNotIn("证据链接", application_renderer)
+        self.assertNotIn("归档记录", application_renderer)
+        self.assertNotIn("查看修改历史", application_renderer)
 
     def test_link_labels_are_specific(self):
         data = sample_data()
@@ -103,7 +107,7 @@ class RenderingTests(unittest.TestCase):
 
         self.assertIn("@media (max-width: 680px)", html)
         self.assertIn(
-            ".compact-metrics { grid-template-columns: repeat(4, 1fr)", html
+            ".compact-metrics { grid-template-columns: repeat(5, 1fr)", html
         )
         self.assertIn(
             ".filter-main { grid-template-columns: repeat(2, minmax(0, 1fr))",
@@ -145,6 +149,45 @@ class RenderingTests(unittest.TestCase):
 
         self.assertIn("careers.dji.com", html)
         self.assertNotIn("private-note", html)
+
+    def test_editable_dashboard_has_email_sync_controls(self):
+        html = render_dashboard(
+            sample_data_with_email(), editable=True, privacy=False
+        )
+        self.assertIn('data-tab="email"', html)
+        self.assertIn('data-action="email-sync"', html)
+        self.assertIn('data-action="email-confirm"', html)
+        self.assertIn("状态冲突", html)
+        self.assertIn("邮件进度", html)
+
+    def test_privacy_export_omits_all_email_metadata(self):
+        html = render_dashboard(
+            sample_data_with_email(), editable=False, privacy=True
+        )
+        for secretish in (
+            "技术面试邀请",
+            "jobs.example.com",
+            "sha256:" + "a" * 64,
+            "lastSeenUid",
+            "messageKeyHash",
+        ):
+            self.assertNotIn(secretish, html)
+
+    def test_readonly_export_has_no_email_mutation_controls(self):
+        html = render_dashboard(
+            sample_data_with_email(), editable=False, privacy=False
+        )
+        self.assertIn('data-tab="email"', html)
+        self.assertNotIn('data-action="email-confirm"', html)
+        self.assertNotIn('data-action="email-sync"', html)
+
+    def test_email_event_values_use_safe_dom_rendering(self):
+        data = sample_data_with_email()
+        data["emailEvents"][0]["company"] = "</script><script>alert(1)</script>"
+        html = render_dashboard(data, editable=True, privacy=False)
+        self.assertNotIn("</script><script>alert(1)</script>", html)
+        self.assertIn("\\u003c/script", html)
+        self.assertNotIn("innerHTML", html)
 
 
 if __name__ == "__main__":

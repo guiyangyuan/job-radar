@@ -27,6 +27,7 @@ Job hunting usually splits into two disconnected problems: finding roles that ar
 - **Choose one primary role per company** with at most two alternatives, instead of flooding the dashboard with near-duplicates.
 - **Respect application limits** when an official company source publishes a quota or role-change rule.
 - **Track the real funnel** from applied and assessment through interview, offer, rejection, withdrawal, and archive.
+- **Review recruitment emails locally** through read-only IMAP, then confirm each proposed progress change before it becomes canonical.
 - **Keep personal data local** in explicit JSON files that remain outside the installed skill and outside Git.
 
 ## Dashboard
@@ -43,6 +44,12 @@ The application view intentionally keeps editing simple: open the original job o
   <img src="docs/assets/dashboard-progress.jpg" alt="Application progress with assessment, interview, and rejected states" width="100%" />
 </p>
 
+### Recruitment email review
+
+The optional email workflow reads only `INBOX` through TLS IMAP, classifies minimized recruitment events locally, and places them in a review queue. Nothing changes an application until you confirm that specific proposal. Credentials stay in environment variables and are never written to the workspace.
+
+Personal QQ, NetEase, and Gmail accounts can be detected from the mailbox domain. Tencent, NetEase, and Aliyun enterprise-mail presets are also available, with a custom TLS IMAP fallback. See [`job-radar/references/email-sync.md`](job-radar/references/email-sync.md) for provider configuration and privacy details.
+
 ## How it works
 
 ```mermaid
@@ -54,6 +61,8 @@ flowchart LR
     E --> F["Local recommendation dashboard"]
     F -->|"User confirms application"| G["Local application record"]
     G --> H["Assessment / Interview / Offer / Rejected"]
+    I["Optional read-only recruitment email sync"] --> J["Local review proposal"]
+    J -->|"User confirms"| H
 ```
 
 Codex handles resume interpretation and current web discovery. The bundled Python runtime provides deterministic schemas, source precedence, link classification, deduplication, scoring, storage, history, privacy export, and the local dashboard.
@@ -114,6 +123,8 @@ I submitted the application for JOB_ID. Record it as applied.
 The company invited me to a technical interview. Update the application status.
 
 Export a read-only privacy-safe snapshot of my current progress.
+
+Sync my recruitment emails from the last 60 days and show proposals for review.
 ```
 
 Job Radar treats visiting an application page as navigation only. It creates an application record only after the user explicitly confirms submission.
@@ -150,6 +161,8 @@ job-radar-data/
 ├── jobs.json                # normalized and scored job pool
 ├── applications.json        # user-confirmed application states
 ├── company-policies.json    # verified quotas and role-change rules
+├── email-sync.json          # hashed mailbox identity and IMAP cursor only
+├── email-events.json        # minimized, reviewable progress proposals
 ├── settings.json
 ├── backups/                 # bounded canonical backups
 └── exports/                 # privacy-filtered HTML snapshots
@@ -164,6 +177,7 @@ The workspace is separate from the installed skill. The repository ignores `job-
 - Never bypasses login, CAPTCHA, MFA, robots rules, rate limits, or anti-automation controls.
 - Never invents deadlines, eligibility rules, salaries, locations, job IDs, or application URLs.
 - Never advances an application stage without explicit user confirmation or user-provided evidence.
+- Never stores mailbox credentials, message bodies, raw MIME, attachments, or full sender addresses; email access is explicit, read-only, and limited to `INBOX`.
 - Removes notes, evidence links, and their history copies from privacy exports.
 - Rejects non-loopback dashboard binding, malformed JSON, unsafe URLs, stale writes, and oversized request bodies.
 
@@ -181,6 +195,9 @@ See [`job-radar/SKILL.md`](job-radar/SKILL.md) for the complete agent workflow a
 | `score` | Apply hard filters and the explainable six-part score |
 | `apply` | Record a user-confirmed application |
 | `update` | Change an application and append an auditable history event |
+| `email-test` | Verify read-only IMAP configuration without persisting credentials |
+| `email-sync` | Fetch a bounded window and create local review proposals |
+| `email-summary` | Summarize pending email proposals and canonical application states |
 | `serve` | Run the token-protected loopback dashboard |
 | `export` | Generate a self-contained read-only HTML snapshot |
 | `summary` | Summarize job-pool and application states |
@@ -212,7 +229,7 @@ PYTHONPATH=job-radar/scripts \
   python3 -m unittest discover -s job-radar/tests -t job-radar -v
 ```
 
-The current suite contains **103 tests** covering schemas, scoring, source precedence, links, company grouping, application history, privacy exports, dashboard rendering, and loopback-server security.
+The current suite contains **161 tests** covering schemas, scoring, source precedence, links, company grouping, application history, email privacy and classification, IMAP behavior, privacy exports, dashboard rendering, and loopback-server security.
 
 ## License
 

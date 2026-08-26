@@ -1,11 +1,25 @@
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
-from tests.helpers import company_policy, job, official_job, profile
+import job_radar
+from job_radar_lib.imap_sync import FetchedMessage, SyncBatch
+from tests.helpers import (
+    application,
+    company_policy,
+    email_event,
+    email_sync_state,
+    job,
+    official_job,
+    profile,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -188,6 +202,109 @@ class CliTests(unittest.TestCase):
         self.assertEqual(policies[0]["maxApplications"], 1)
         validation = self.run_ok("validate", "--workspace", str(self.workspace))
         self.assertEqual(json.loads(validation.stdout)["companyPolicies"], 1)
+
+    def test_email_test_has_no_password_argument(self):
+        result = self.run_cli("email-test", "--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("--password", result.stdout)
+        self.assertNotIn("--app-password", result.stdout)
+
+    def test_email_test_missing_config_has_safe_error(self):
+        self.run_ok("init", "--workspace", str(self.workspace))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                code = job_radar.main(
+                    ["email-test", "--workspace", str(self.workspace)]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("JOB_RADAR_IMAP_USERNAME is not set", stderr.getvalue())
+
+    def test_email_sync_persists_events_but_not_applications(self):
+        self.run_ok("init", "--workspace", str(self.workspace))
+        before = (self.workspace / "applications.json").read_text(encoding="utf-8")
+        fetched = FetchedMessage(
+            uid_validity=7,
+            uid=42,
+            message_id="<synthetic@example.com>",
+            received_at="2026-08-21T09:30:00+08:00",
+            sender_domain="jobs.example.com",
+            subject="在线测评邀请",
+            text="公司：示例科技\n应聘岗位：AI 应用开发工程师\n请完成在线测评",
+            has_attachments=False,
+        )
+        batch = SyncBatch(
+            messages=[fetched],
+            issues=[],
+            state=email_sync_state(lastSeenUid=42),
+        )
+        safe_env = {
+            "JOB_RADAR_IMAP_USERNAME": "candidate@qq.com",
+            "JOB_RADAR_IMAP_APP_PASSWORD": "synthetic-secret",
+            "JOB_RADAR_IMAP_PROVIDER": "qq",
+        }
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, safe_env, clear=True), mock.patch(
+            "job_radar.sync_messages", return_value=batch
+        ), redirect_stdout(output):
+            code = job_radar.main(
+                [
+                    "email-sync",
+                    "--workspace",
+                    str(self.workspace),
+                    "--days",
+                    "60",
+                ]
+            )
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertEqual(
+            (self.workspace / "applications.json").read_text(encoding="utf-8"),
+            before,
+        )
+        events = json.loads(
+            (self.workspace / "email-events.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["state"], "pending")
+        self.assertNotIn("请完成在线测评", repr(events))
+
+    def test_email_summary_separates_pending_from_canonical_statuses(self):
+        self.run_ok("init", "--workspace", str(self.workspace))
+        (self.workspace / "applications.json").write_text(
+            json.dumps([application()], ensure_ascii=False), encoding="utf-8"
+        )
+        (self.workspace / "email-events.json").write_text(
+            json.dumps([email_event()], ensure_ascii=False), encoding="utf-8"
+        )
+        result = self.run_ok(
+            "email-summary", "--workspace", str(self.workspace), "--json"
+        )
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["emailEvents"]["pending"], 1)
+        self.assertEqual(payload["emailEvents"]["classifications"]["actionable"], 1)
+        self.assertEqual(payload["applications"]["applied"], 1)
+
+    def test_email_sync_rejects_invalid_window(self):
+        self.run_ok("init", "--workspace", str(self.workspace))
+        result = self.run_cli(
+            "email-sync",
+            "--workspace",
+            str(self.workspace),
+            "--days",
+            "0",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("1 to 3650", result.stderr)
+
+    def test_validate_checks_email_files_and_rejects_secret_fields(self):
+        self.run_ok("init", "--workspace", str(self.workspace))
+        invalid = email_sync_state(appPassword="must-not-be-stored")
+        (self.workspace / "email-sync.json").write_text(
+            json.dumps(invalid), encoding="utf-8"
+        )
+        result = self.run_cli("validate", "--workspace", str(self.workspace))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown email sync fields", result.stderr)
 
 
 if __name__ == "__main__":

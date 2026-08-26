@@ -1,6 +1,6 @@
 ---
 name: job-radar
-description: Local-first job discovery and application tracking for Mainland China campus, internship, and experienced-hire searches. Use when Codex needs to build a job-search profile from a resume or onboarding answers, find and rank matching roles from official and public recruitment sources, record user-confirmed applications, update recruitment stages, serve an editable local HTML dashboard, or summarize job-search progress.
+description: Local-first job discovery, recruitment-email review, and application tracking for Mainland China campus, internship, and experienced-hire searches. Use when Codex needs to build a job-search profile from a resume or onboarding answers, find and rank matching roles from official and public recruitment sources, review mailbox-derived progress proposals, record user-confirmed applications, update recruitment stages, serve an editable local HTML dashboard, or summarize job-search progress.
 ---
 
 # Job Radar
@@ -14,6 +14,8 @@ Build a privacy-safe job-search profile, discover current Mainland China opening
 - Never bypass login, CAPTCHA, MFA, access controls, robots rules, rate limits, or a site's anti-automation measures.
 - Never invent a deadline, graduation window, experience requirement, salary, location, job identifier, status, or application URL.
 - Never advance an application stage without explicit user confirmation or user-provided evidence.
+- Never ask the user to paste an email app password into chat or pass one as a command-line argument. Read mailbox configuration only from process environment variables.
+- Never treat an email-derived event as canonical progress. It remains a proposal until the user confirms that specific event and final status.
 - Never publish notes or evidence links. Use `export --privacy` for anything the user may share.
 - Treat visiting an application link as navigation only, not evidence of submission.
 
@@ -31,7 +33,7 @@ Locate an existing workspace from conversation context before creating one. If n
 python3 "$SKILL_DIR/scripts/job_radar.py" init --workspace ./job-radar-data
 ```
 
-The workspace contains `profile.json`, `jobs.json`, `applications.json`, `company-policies.json`, `settings.json`, bounded backups, and HTML exports. Read the canonical JSON at the beginning of every invocation; dashboard edits become visible to Codex on the next invocation, not continuously.
+The workspace contains `profile.json`, `jobs.json`, `applications.json`, `company-policies.json`, `settings.json`, `email-sync.json`, `email-events.json`, bounded backups, and HTML exports. Email files contain only a hashed mailbox identity, cursor, minimized metadata, and structured proposals—not credentials, full addresses, bodies, raw MIME, or attachments. Read the canonical JSON at the beginning of every invocation; dashboard edits become visible to Codex on the next invocation, not continuously.
 
 ## Choose the workflow
 
@@ -40,7 +42,10 @@ The workspace contains `profile.json`, `jobs.json`, `applications.json`, `compan
 - **User says they applied:** ask for explicit confirmation if it is not already clear, then create the application record.
 - **User reports screening, assessment, interview, offer, rejection, or withdrawal:** update only the supported fields and retain evidence/history.
 - **User wants the tracker:** start the editable dashboard or create a read-only privacy export.
+- **User explicitly asks to sync a mailbox:** read [references/email-sync.md](references/email-sync.md), verify environment configuration, state that read-only `INBOX` access and the requested initial time window will be used, run `email-test`, and only then run `email-sync`.
 - **User asks for progress:** read current JSON and return a concise funnel/status summary.
+
+Ordinary profile building, job discovery, scoring, application recording, dashboard use, and summaries never connect to email. A mailbox is accessed only during an explicit `email-test` or `email-sync` request.
 
 ## 1. Build and confirm a privacy-safe profile
 
@@ -126,7 +131,22 @@ python3 "$SKILL_DIR/scripts/job_radar.py" update \
 
 Use `archived` instead of deleting mistaken or abandoned records. Never silently overwrite a version conflict; reload the canonical record and reconcile with the user.
 
-## 5. Use the dashboard
+## 5. Review recruitment email progress
+
+Read [references/email-sync.md](references/email-sync.md) before the first mailbox operation. Require the user to configure the generic IMAP environment variables outside chat. Personal QQ, NetEase, and Gmail addresses are auto-detected; enterprise presets and custom TLS IMAP configuration cover other mailboxes. Do not claim Microsoft 365 or Outlook support without an OAuth flow.
+
+Always test the connection before a sync:
+
+```bash
+python3 "$SKILL_DIR/scripts/job_radar.py" email-test --workspace "$WORKSPACE"
+python3 "$SKILL_DIR/scripts/job_radar.py" email-sync --workspace "$WORKSPACE" --days 60
+```
+
+The first sync reads only the requested recent window (60 days by default); later syncs use the saved UID cursor. The client selects `INBOX` read-only and fetches with `BODY.PEEK[]`. It never marks, moves, deletes, or sends mail. Parsing is deterministic and local; no email content is sent to an external model API.
+
+Email-derived events are proposals. Open the `邮件进度` tab or use `email-summary`, review the matched company/application, edit incomplete fields, and ask the user to confirm the specific final action. Never update `applications.json` merely because a message was classified. Confirmation records an auditable `channel=email` history event.
+
+## 6. Use the dashboard
 
 Start the token-protected editable dashboard:
 
@@ -134,7 +154,7 @@ Start the token-protected editable dashboard:
 python3 "$SKILL_DIR/scripts/job_radar.py" serve --workspace "$WORKSPACE"
 ```
 
-The service binds only to `127.0.0.1`, prints a tokenized local URL, and normally opens it in the browser. Use `--no-open` in a headless environment. The dashboard provides `岗位推荐` and `投递进度` tabs. Recommendations are grouped by company with one primary role, at most two alternatives, and an explicit verified quota or unknown-rule badge. Edits save immediately to canonical JSON with backups and conflict checks.
+The service binds only to `127.0.0.1`, prints a tokenized local URL, and normally opens it in the browser. Use `--no-open` in a headless environment. The dashboard provides `岗位推荐`, `投递进度`, `邮件进度`, and `数据概览` tabs. Recommendations are grouped by company with one primary role, at most two alternatives, and an explicit verified quota or unknown-rule badge. The email tab separates pending proposals from confirmed/ignored history; edits save immediately to canonical JSON with backups and conflict checks.
 
 Create a self-contained shareable snapshot only in privacy mode:
 
@@ -142,9 +162,9 @@ Create a self-contained shareable snapshot only in privacy mode:
 python3 "$SKILL_DIR/scripts/job_radar.py" export --workspace "$WORKSPACE" --privacy
 ```
 
-The static export is read-only. Privacy mode removes notes, evidence links, and their copies in history events.
+The static export is read-only. Privacy mode removes notes, evidence links, their copies in history events, and all recruitment-email state and metadata.
 
-## 6. Summarize and hand off
+## 7. Summarize and hand off
 
 ```bash
 python3 "$SKILL_DIR/scripts/job_radar.py" summary --workspace "$WORKSPACE" --json
@@ -166,6 +186,9 @@ update      Change an application and append an auditable history event
 serve       Run the editable token-protected loopback dashboard
 export      Write a self-contained read-only HTML snapshot
 summary     Count job-pool and application states
+email-test  Test a configured IMAP mailbox with read-only access
+email-sync  Read a bounded mailbox window into the pending review queue
+email-summary  Count email proposals separately from canonical applications
 ```
 
 If a public page is inaccessible, record `needs_verification` when updating an existing record, preserve its last known public link, and tell the user what could not be verified. Do not weaken the boundaries to obtain more data.

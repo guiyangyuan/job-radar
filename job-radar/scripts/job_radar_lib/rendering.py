@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .email_models import validate_email_events, validate_email_sync_state
 from .models import (
     validate_application,
     validate_company_policy,
@@ -31,6 +32,8 @@ def _validated_data(data: dict) -> dict:
     company_policies = [
         validate_company_policy(item) for item in data.get("companyPolicies", [])
     ]
+    email_sync = data.get("emailSync")
+    email_events = data.get("emailEvents", [])
     return {
         "profile": profile,
         "jobs": jobs,
@@ -41,6 +44,10 @@ def _validated_data(data: dict) -> dict:
             applications,
             company_policies,
         ),
+        "emailSync": (
+            validate_email_sync_state(email_sync) if email_sync is not None else None
+        ),
+        "emailEvents": validate_email_events(email_events),
         "generatedAt": data.get("generatedAt")
         or datetime.now(timezone.utc).isoformat(),
     }
@@ -63,6 +70,8 @@ def _apply_privacy_mode(data: dict) -> dict:
             if clean_event["changes"]:
                 redacted_history.append(clean_event)
         application["history"] = redacted_history
+    private["emailSync"] = None
+    private["emailEvents"] = []
     return private
 
 
@@ -83,13 +92,23 @@ def render_dashboard(data: dict, *, editable: bool, privacy: bool) -> str:
         canonical = _apply_privacy_mode(canonical)
     template = TEMPLATE.read_text(encoding="utf-8")
     edit_marker = (
-        '<template data-action="application-status"></template>' if editable else ""
+        '<template data-action="application-status"></template>'
+        '<template data-action="email-confirm"></template>'
+        if editable
+        else ""
+    )
+    email_sync_control = (
+        '<button id="email-sync-button" class="button primary" '
+        'data-action="email-sync" type="button">同步最近 60 天</button>'
+        if editable
+        else '<span class="chip">只读邮件快照</span>'
     )
     return (
         template.replace("__INITIAL_DATA__", _escape_json_for_html(canonical))
         .replace("__EDITABLE__", "true" if editable else "false")
         .replace("__MODE_LABEL__", "本地可编辑" if editable else "只读快照")
         .replace("__EDIT_CONTROLS_MARKER__", edit_marker)
+        .replace("__EMAIL_SYNC_CONTROL__", email_sync_control)
     )
 
 
@@ -109,6 +128,9 @@ def write_export(
         "companyPolicies": read_json(workspace.company_policies),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
+    if not privacy:
+        data["emailSync"] = read_json(workspace.email_sync)
+        data["emailEvents"] = read_json(workspace.email_events)
     html = render_dashboard(data, editable=False, privacy=privacy)
     temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
     try:

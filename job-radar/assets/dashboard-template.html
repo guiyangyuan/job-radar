@@ -36,7 +36,7 @@
     .subtitle, .muted { color: var(--muted); }
     .subtitle { margin: 0; font-size: 14px; }
     .mode { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-    .compact-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+    .compact-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
     .compact-metrics article { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
     .compact-metrics span { display: block; color: var(--muted); font-size: 12px; }
     .compact-metrics strong { display: block; margin-top: 5px; font-size: 22px; }
@@ -109,6 +109,34 @@
     .application-head { display: grid; grid-template-columns: minmax(0, 1fr) 180px; align-items: center; gap: 18px; }
     .application-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .application-status label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .list { display: grid; gap: 14px; }
+    .card { padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--shadow); }
+    .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+    .card .title { margin: 0; font-size: 18px; }
+    .card .company { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; color: var(--muted); background: var(--soft); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .chip.good { color: var(--good); background: var(--good-soft); }
+    .chip.warn { color: var(--warn); background: var(--warn-soft); }
+    .detail-grid, .edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .detail-block { padding: 11px; border-radius: 9px; background: var(--soft); }
+    .detail-block strong, .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+    .detail-block p { margin: 3px 0; font-size: 13px; }
+    .field.wide { grid-column: span 2; }
+    .email-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+    .email-toolbar h2, .email-section h2 { margin: 0; font-size: 17px; }
+    .email-toolbar p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .email-filter { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 10px; margin-bottom: 14px; }
+    .email-section { margin-top: 18px; }
+    .email-section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .email-card.conflict { border-color: #f0b35b; }
+    .banner { display: none; margin-bottom: 12px; padding: 11px 13px; border: 1px solid #f0b35b; border-radius: 10px; color: var(--warn); background: var(--warn-soft); }
+    .banner.visible { display: block; }
+    .overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .overview-card { min-height: 190px; }
+    .overview-card h2 { margin: 0 0 14px; font-size: 17px; }
+    .bar-row { display: grid; grid-template-columns: 100px 1fr auto; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
+    .bar-track { height: 9px; overflow: hidden; border-radius: 999px; background: #e9edf4; }
+    .bar { height: 100%; border-radius: inherit; background: var(--brand); }
     .footer { margin-top: 24px; color: var(--muted); text-align: center; font-size: 11px; }
     @media (max-width: 680px) {
       .shell { width: min(100% - 20px, 960px); padding-top: 12px; }
@@ -116,7 +144,7 @@
       .hero h1 { margin: 2px 0 0; font-size: 28px; }
       .hero .subtitle { display: none; }
       .mode { padding: 5px 8px; }
-      .compact-metrics { grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 10px; }
+      .compact-metrics { grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 10px; }
       .compact-metrics article { min-width: 0; padding: 8px 4px; text-align: center; }
       .compact-metrics span { min-height: 30px; font-size: 10px; line-height: 1.35; }
       .compact-metrics strong { margin-top: 1px; font-size: 18px; }
@@ -131,6 +159,11 @@
       .button, button, select { min-height: 44px; }
       .primary-job { padding: 14px; }
       .company-header, .application-card { padding: 14px; }
+      .tabs { overflow-x: auto; }
+      .tab { min-width: 92px; }
+      .email-toolbar { align-items: flex-start; flex-direction: column; }
+      .email-filter, .detail-grid, .edit-grid, .overview-grid { grid-template-columns: 1fr; }
+      .field.wide { grid-column: span 1; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
@@ -153,11 +186,14 @@
       <article><span>准备中</span><strong id="metric-preparing">0</strong></article>
       <article><span>已投递</span><strong id="metric-applied">0</strong></article>
       <article><span>面试中</span><strong id="metric-interviews">0</strong></article>
+      <article><span>邮件待确认</span><strong id="metric-email">0</strong></article>
     </section>
 
     <nav class="tabs" aria-label="工作台页签">
       <button class="tab active" data-tab="recommendations" type="button">岗位推荐</button>
       <button class="tab" data-tab="applications" type="button">投递进度</button>
+      <button class="tab" data-tab="email" type="button">邮件进度</button>
+      <button class="tab" data-tab="overview" type="button">数据概览</button>
     </nav>
 
     <section class="panel active" data-panel="recommendations">
@@ -206,6 +242,48 @@
       <div id="applications-list" class="application-list"></div>
     </section>
 
+    <section class="panel" data-panel="email">
+      <div class="email-toolbar">
+        <div>
+          <h2>招聘邮件同步</h2>
+          <p id="email-sync-status">只读访问 INBOX · 尚未同步</p>
+        </div>
+        __EMAIL_SYNC_CONTROL__
+      </div>
+      <div id="email-conflict-banner" class="banner">数据已变化，已重新载入待确认队列。</div>
+      <div class="email-filter">
+        <select id="email-filter-classification" aria-label="邮件分类">
+          <option value="">全部分类</option>
+          <option value="actionable">可处理</option>
+          <option value="incomplete">信息不足</option>
+          <option value="conflict">状态冲突</option>
+          <option value="irrelevant">无关信息</option>
+        </select>
+        <select id="email-filter-status" aria-label="建议状态">
+          <option value="">全部建议状态</option>
+          <option value="applied">已投递</option>
+          <option value="screening">筛选中</option>
+          <option value="assessment">测评</option>
+          <option value="interview">面试</option>
+          <option value="offer">Offer</option>
+          <option value="rejected">已拒绝</option>
+          <option value="closed">已结束</option>
+        </select>
+      </div>
+      <section class="email-section">
+        <div class="email-section-head"><h2>待确认</h2><span id="email-pending-count" class="chip">0</span></div>
+        <div id="email-pending-list" class="list"></div>
+      </section>
+      <section class="email-section">
+        <div class="email-section-head"><h2>已处理与忽略</h2></div>
+        <div id="email-history-list" class="list"></div>
+      </section>
+    </section>
+
+    <section class="panel" data-panel="overview">
+      <div id="overview" class="overview-grid"></div>
+    </section>
+
     <footer class="footer">数据生成时间：<span id="generated-at"></span> · 页面不加载第三方脚本、字体或分析服务</footer>
   </main>
 
@@ -218,7 +296,9 @@
     const state = {
       jobs: data.jobs || [],
       applications: data.applications || [],
-      companyGroups: data.companyGroups || []
+      companyGroups: data.companyGroups || [],
+      emailSync: data.emailSync || null,
+      emailEvents: data.emailEvents || []
     };
     const actionableStatuses = new Set(["discovered", "saved", "preparing"]);
     const statusLabels = {
@@ -229,6 +309,7 @@
       discovered:"新发现", saved:"已收藏", preparing:"准备中", applied:"已投递",
       ignored:"已忽略", expired:"已过期", archived:"已归档"
     };
+    const classificationLabels = {actionable:"可处理", incomplete:"信息不足", conflict:"状态冲突", irrelevant:"无关信息"};
 
     function node(tag, className, text) {
       const item = document.createElement(tag);
@@ -266,6 +347,19 @@
     }
     function empty(message) {
       return node("div", "empty", message);
+    }
+    function detailBlock(label, lines) {
+      const block = node("div", "detail-block");
+      block.appendChild(node("strong", "", label));
+      (lines || []).filter(Boolean).forEach(line =>
+        block.appendChild(node("p", "", line))
+      );
+      return block;
+    }
+    function field(label, control, wide) {
+      const wrapper = node("div", "field" + (wide ? " wide" : ""));
+      append(wrapper, node("label", "", label), control);
+      return wrapper;
     }
     function selectControl(options, value) {
       const control = node("select");
@@ -308,6 +402,7 @@
         state.applications.filter(item => item.status !== "archived").length;
       document.getElementById("metric-interviews").textContent =
         state.applications.filter(item => item.status === "interview").length;
+      document.getElementById("metric-email").textContent = state.emailEvents.filter(item => item.state === "pending").length;
     }
 
     function populateFilters() {
@@ -639,11 +734,170 @@
       });
     }
 
-    function renderAll() {
-      updateMetrics();
-      renderRecommendations();
-      renderApplications();
+    function showEmailConflict() {
+      const banner = document.getElementById("email-conflict-banner");
+      banner.classList.add("visible");
     }
+    async function reloadEmailData(showConflict) {
+      try {
+        const [events, status, applications] = await Promise.all([
+          api("/api/email-events"), api("/api/email-sync/status"), api("/api/applications")
+        ]);
+        state.emailEvents = events.events || [];
+        state.emailSync = status;
+        state.applications = applications.applications || [];
+        if (showConflict) showEmailConflict();
+        renderEmail(); renderApplications(); updateMetrics(); renderOverview();
+      } catch (_) { if (showConflict) showEmailConflict(); }
+    }
+    async function saveEmailEvent(event, updates, card) {
+      setSaveState(card, "正在保存…", "");
+      try {
+        const result = await api("/api/email-events/" + encodeURIComponent(event.id), {method:"PATCH", body:JSON.stringify({updates, updatedAt:event.updatedAt})});
+        Object.assign(event, result.event); setSaveState(card, "已保存", "good"); renderEmail();
+      } catch (error) {
+        if (error.status === 409) await reloadEmailData(true);
+        else setSaveState(card, "保存失败：" + error.message, "bad");
+      }
+    }
+    async function ignoreEmailEvent(event, ignored, card) {
+      setSaveState(card, ignored ? "正在忽略…" : "正在恢复…", "");
+      try {
+        const result = await api("/api/email-events/" + encodeURIComponent(event.id) + "/ignore", {method:"POST", body:JSON.stringify({ignored, updatedAt:event.updatedAt})});
+        Object.assign(event, result.event); renderEmail(); updateMetrics();
+      } catch (error) {
+        if (error.status === 409) await reloadEmailData(true);
+        else setSaveState(card, "操作失败：" + error.message, "bad");
+      }
+    }
+    async function confirmEmailEvent(event, recruitmentType, card) {
+      if (!event.proposedStatus) { setSaveState(card, "请先选择最终状态并保存", "bad"); return; }
+      const application = state.applications.find(item => item.id === event.matchedApplicationId) || null;
+      const target = application ? application.company + " · " + application.title : (event.company || "未填写公司") + " · " + (event.title || "未填写岗位");
+      if (!window.confirm("确认把这封邮件更新为正式进度？\n" + target + " → " + (statusLabels[event.proposedStatus] || event.proposedStatus))) return;
+      setSaveState(card, "正在确认正式进度…", "");
+      const payload = {
+        confirmed:true,
+        status:event.proposedStatus,
+        applicationId:application ? application.id : null,
+        updatedAt:event.updatedAt,
+        applicationUpdatedAt:application ? application.updatedAt : null,
+      };
+      if (!application) {
+        payload.company = event.company;
+        payload.title = event.title;
+        payload.recruitmentType = recruitmentType;
+      }
+      try {
+        await api("/api/email-events/" + encodeURIComponent(event.id) + "/confirm", {method:"POST", body:JSON.stringify(payload)});
+        await reloadEmailData(false);
+      } catch (error) {
+        if (error.status === 409) await reloadEmailData(true);
+        else setSaveState(card, "确认失败：" + error.message, "bad");
+      }
+    }
+    function emailCard(event) {
+      const card = node("article", "card email-card" + (event.classification === "conflict" ? " conflict" : ""));
+      card.dataset.emailEventId = event.id;
+      const heading = node("div");
+      append(heading, node("h2", "title", event.title || "待确认岗位"), node("p", "company", event.company || "待确认公司"));
+      const classification = node("span", "chip " + (event.classification === "conflict" ? "warn" : "good"), classificationLabels[event.classification] || event.classification);
+      append(card, append(node("div", "card-head"), heading, classification));
+      const detail = node("div", "detail-grid");
+      append(detail,
+        detailBlock("建议状态", [(statusLabels[event.proposedStatus] || event.proposedStatus || "未判断"), event.interviewStage || "未提供面试阶段"]),
+        detailBlock("下一步", [event.nextAction || "未设置", "截止：" + formatDate(event.nextActionAt)]),
+        detailBlock("识别依据", event.reasons || []),
+        detailBlock("邮件摘要", ["收到：" + formatDate(event.receivedAt), "置信度：" + Math.round(Number(event.confidence || 0) * 100) + "%"])
+      );
+      card.appendChild(detail);
+      if (EDITABLE && event.state === "pending") {
+        const grid = node("div", "edit-grid");
+        const company = node("input"); company.value = event.company || ""; company.placeholder = "公司名称";
+        const title = node("input"); title.value = event.title || ""; title.placeholder = "岗位名称";
+        const status = selectControl([["", "请选择最终状态"], ...Object.entries(statusLabels)], event.proposedStatus);
+        const stage = node("input"); stage.value = event.interviewStage || ""; stage.placeholder = "如：技术一面";
+        const next = node("input"); next.value = event.nextAction || ""; next.placeholder = "下一步行动";
+        const due = node("input"); due.type = "datetime-local"; due.value = event.nextActionAt ? event.nextActionAt.slice(0, 16) : "";
+        const applicationOptions = [["", "新建投递记录"], ...state.applications.map(item => [item.id, item.company + " · " + item.title + " · " + (statusLabels[item.status] || item.status)])];
+        const matched = selectControl(applicationOptions, event.matchedApplicationId);
+        const recruitmentType = selectControl([["campus", "校招"], ["experienced", "社招"], ["internship", "实习"]], "campus");
+        append(grid, field("公司", company), field("岗位", title), field("最终状态", status), field("面试阶段", stage), field("下一步", next), field("截止时间", due), field("匹配投递记录", matched, true), field("新建记录类型", recruitmentType));
+        const save = node("button", "button", "保存修改"); save.type = "button";
+        save.addEventListener("click", () => saveEmailEvent(event, {
+          company:company.value.trim() || null,
+          title:title.value.trim() || null,
+          proposedStatus:status.value || null,
+          interviewStage:stage.value.trim() || null,
+          nextAction:next.value.trim() || null,
+          nextActionAt:due.value ? new Date(due.value).toISOString() : null,
+          matchedApplicationId:matched.value || null,
+        }, card));
+        const confirm = node("button", "button primary", "确认写入正式进度"); confirm.type = "button"; confirm.dataset.action = "email-confirm";
+        confirm.addEventListener("click", () => confirmEmailEvent(event, recruitmentType.value, card));
+        const ignore = node("button", "button danger", "忽略此建议"); ignore.type = "button"; ignore.addEventListener("click", () => ignoreEmailEvent(event, true, card));
+        append(grid, append(node("div", "actions field wide"), save, confirm, ignore)); card.appendChild(grid);
+      } else if (EDITABLE && ["ignored", "error"].includes(event.state)) {
+        const actions = node("div", "actions");
+        if (event.state === "ignored") {
+          const restore = node("button", "button", "恢复到待确认"); restore.type = "button"; restore.addEventListener("click", () => ignoreEmailEvent(event, false, card)); actions.appendChild(restore);
+        } else {
+          const ignore = node("button", "button danger", "忽略解析失败记录"); ignore.type = "button"; ignore.addEventListener("click", () => ignoreEmailEvent(event, true, card)); actions.appendChild(ignore);
+        }
+        card.appendChild(actions);
+      }
+      card.appendChild(node("div", "save-state", ""));
+      return card;
+    }
+    function emailMatches(event) {
+      const classification = document.getElementById("email-filter-classification").value;
+      const status = document.getElementById("email-filter-status").value;
+      return (!classification || event.classification === classification) && (!status || event.proposedStatus === status);
+    }
+    function renderEmail() {
+      const sync = state.emailSync || {};
+      const provider = sync.provider ? String(sync.provider).toUpperCase() : "未连接";
+      document.getElementById("email-sync-status").textContent = provider + " · 只读 " + (sync.folder || "INBOX") + " · " + (sync.lastSyncedAt ? "上次同步 " + formatDate(sync.lastSyncedAt) : "尚未同步");
+      const pendingRoot = document.getElementById("email-pending-list"); const historyRoot = document.getElementById("email-history-list");
+      pendingRoot.replaceChildren(); historyRoot.replaceChildren();
+      const filtered = state.emailEvents.filter(emailMatches).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
+      const pending = filtered.filter(event => event.state === "pending");
+      const history = filtered.filter(event => event.state !== "pending");
+      document.getElementById("email-pending-count").textContent = pending.length;
+      if (!pending.length) pendingRoot.appendChild(empty("没有待确认的招聘邮件建议")); else pending.forEach(event => pendingRoot.appendChild(emailCard(event)));
+      if (!history.length) historyRoot.appendChild(empty("暂无已处理或忽略记录")); else history.forEach(event => historyRoot.appendChild(emailCard(event)));
+    }
+    async function runEmailSync(button) {
+      button.disabled = true; button.textContent = "同步中…";
+      try { await api("/api/email-sync/run", {method:"POST", body:JSON.stringify({days:60})}); await reloadEmailData(false); }
+      catch (error) { if (error.status === 409) await reloadEmailData(true); else { const banner = document.getElementById("email-conflict-banner"); banner.textContent = "同步失败：" + error.message; banner.classList.add("visible"); } }
+      finally { button.disabled = false; button.textContent = "同步最近 60 天"; }
+    }
+
+    function countBy(items, key, fallback) {
+      return items.reduce((result, item) => { const value = item[key] || fallback; result[value] = (result[value] || 0) + 1; return result; }, {});
+    }
+    function barCard(title, values) {
+      const card = node("article", "card overview-card"); card.appendChild(node("h2", "", title));
+      const entries = Object.entries(values).sort((a, b) => b[1] - a[1]); const maximum = Math.max(1, ...entries.map(item => item[1]));
+      if (!entries.length) card.appendChild(node("p", "subtitle", "暂无数据"));
+      entries.forEach(([label, value]) => {
+        const row = node("div", "bar-row"); const track = node("div", "bar-track"); const bar = node("div", "bar"); bar.style.width = (value / maximum * 100) + "%"; track.appendChild(bar); append(row, node("span", "", statusLabels[label] || poolLabels[label] || label), track, node("b", "", value)); card.appendChild(row);
+      });
+      return card;
+    }
+    function renderOverview() {
+      const root = document.getElementById("overview"); root.replaceChildren();
+      const funnel = {"已发现":state.jobs.length, "已收藏":state.jobs.filter(job => ["saved", "preparing", "applied"].includes(job.poolStatus)).length, "已投递":state.applications.length, "面试":state.applications.filter(item => item.status === "interview").length, "Offer":state.applications.filter(item => item.status === "offer").length};
+      const cityCounts = {}; state.jobs.flatMap(job => job.cities || []).forEach(city => { cityCounts[city] = (cityCounts[city] || 0) + 1; });
+      const sourceCounts = {}; state.jobs.flatMap(job => job.sources || []).forEach(source => { sourceCounts[source.name] = (sourceCounts[source.name] || 0) + 1; });
+      append(root, barCard("求职漏斗", funnel), barCard("投递状态", countBy(state.applications, "status", "未知")), barCard("岗位城市", cityCounts), barCard("岗位来源", sourceCounts));
+      const overdue = state.applications.filter(item => item.nextActionAt && new Date(item.nextActionAt) < new Date() && !["offer", "rejected", "closed", "archived"].includes(item.status));
+      root.appendChild(barCard("逾期行动", overdue.reduce((result, item) => { result[item.company] = (result[item.company] || 0) + 1; return result; }, {})));
+      const official = state.jobs.filter(job => Number(job.sourceTier) === 1).length;
+      root.appendChild(barCard("来源质量", {"企业官网":official, "其他来源":Math.max(0, state.jobs.length - official)}));
+    }
+    function renderAll() { updateMetrics(); renderRecommendations(); renderApplications(); renderEmail(); renderOverview(); }
 
     document.querySelectorAll("[data-tab]").forEach(button =>
       button.addEventListener("click", () => {
@@ -665,6 +919,9 @@
         renderRecommendations();
       });
     });
+    ["email-filter-classification", "email-filter-status"].forEach(id => document.getElementById(id).addEventListener("change", renderEmail));
+    const emailSyncButton = document.getElementById("email-sync-button");
+    if (emailSyncButton) emailSyncButton.addEventListener("click", () => runEmailSync(emailSyncButton));
     document.getElementById("generated-at").textContent = formatDate(data.generatedAt);
     populateFilters();
     renderAll();
