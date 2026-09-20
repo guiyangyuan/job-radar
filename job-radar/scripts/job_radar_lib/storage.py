@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .email_models import DEFAULT_EMAIL_SYNC_STATE
+
 
 DEFAULT_PROFILE = {
     "schemaVersion": 1,
@@ -58,6 +60,8 @@ class Workspace:
     applications: Path
     company_policies: Path
     settings: Path
+    email_sync: Path
+    email_events: Path
     backups: Path
     exports: Path
 
@@ -71,6 +75,8 @@ def _workspace_paths(root: Path) -> Workspace:
         applications=resolved / "applications.json",
         company_policies=resolved / "company-policies.json",
         settings=resolved / "settings.json",
+        email_sync=resolved / "email-sync.json",
+        email_events=resolved / "email-events.json",
         backups=resolved / "backups",
         exports=resolved / "exports",
     )
@@ -87,6 +93,8 @@ def initialize_workspace(root: Path) -> Workspace:
         (workspace.applications, []),
         (workspace.company_policies, []),
         (workspace.settings, DEFAULT_SETTINGS),
+        (workspace.email_sync, DEFAULT_EMAIL_SYNC_STATE),
+        (workspace.email_events, []),
     )
     for path, value in initial_values:
         if not path.exists():
@@ -110,6 +118,12 @@ def load_workspace(root: Path) -> Workspace:
     ):
         if not path.is_file():
             raise FileNotFoundError(f"workspace file does not exist: {path}")
+    for path, value in (
+        (workspace.email_sync, DEFAULT_EMAIL_SYNC_STATE),
+        (workspace.email_events, []),
+    ):
+        if not path.exists():
+            write_json_atomic(path, value, workspace.backups)
     return workspace
 
 
@@ -157,3 +171,61 @@ def write_json_atomic(
             temporary.unlink()
 
     _trim_backups(backups, target.stem, max(1, retention))
+
+
+def write_json_bundle_atomic(
+    values: dict[Path, Any],
+    backups: Path,
+    retention: int = 20,
+) -> None:
+    """Replace several JSON files as one recoverable local transaction."""
+    if not values:
+        return
+    backups = Path(backups)
+    backups.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(((Path(path), value) for path, value in values.items()), key=lambda item: str(item[0]))
+    temporaries: dict[Path, Path] = {}
+    originals: dict[Path, bytes | None] = {}
+    replaced: list[Path] = []
+
+    try:
+        for target, value in ordered:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            originals[target] = target.read_bytes() if target.exists() else None
+            if target.exists():
+                read_json(target)
+                shutil.copy2(target, backups / _backup_name(target))
+            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            with temporary.open("w", encoding="utf-8") as stream:
+                json.dump(value, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporaries[target] = temporary
+
+        for target, _value in ordered:
+            os.replace(temporaries[target], target)
+            replaced.append(target)
+
+    except Exception:
+        for target in reversed(replaced):
+            original = originals[target]
+            if original is None:
+                target.unlink(missing_ok=True)
+                continue
+            restore = target.with_name(f".{target.name}.{uuid.uuid4().hex}.restore")
+            try:
+                with restore.open("wb") as stream:
+                    stream.write(original)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(restore, target)
+            finally:
+                restore.unlink(missing_ok=True)
+        raise
+    finally:
+        for temporary in temporaries.values():
+            temporary.unlink(missing_ok=True)
+
+    for target, _value in ordered:
+        _trim_backups(backups, target.stem, max(1, retention))

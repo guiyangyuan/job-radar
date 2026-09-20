@@ -1,4 +1,4 @@
 interface:
   display_name: "Job Radar"
-  short_description: "Discover matching jobs and track applications locally"
-  default_prompt: "Use $job-radar to build my job-search profile, find matching roles, and maintain my local application dashboard."
+  short_description: "Discover jobs, review recruitment email progress, and track applications locally"
+  default_prompt: "Use $job-radar to build my job-search profile, find matching roles, review recruitment email progress when I explicitly request it, and maintain my local application dashboard."

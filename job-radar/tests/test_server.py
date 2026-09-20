@@ -1,3 +1,4 @@
+import concurrent.futures
 import http.client
 import json
 import tempfile
@@ -9,7 +10,21 @@ from types import SimpleNamespace
 from job_radar_lib.server import create_server
 from job_radar_lib.storage import initialize_workspace, read_json, write_json_atomic
 
-from tests.helpers import application, company_policy, job
+from tests.helpers import application, company_policy, email_event, job
+
+
+EVENT_TIME = "2026-08-21T10:00:00+08:00"
+
+
+class BlockingRunner:
+    def __init__(self):
+        self.started = threading.Event()
+        self.release_event = threading.Event()
+
+    def __call__(self, workspace, days):
+        self.started.set()
+        self.release_event.wait(timeout=2)
+        return {"fetched": 0, "added": 0, "days": days}
 
 
 class ServerTests(unittest.TestCase):
@@ -20,8 +35,28 @@ class ServerTests(unittest.TestCase):
             self.workspace.applications, [application()], self.workspace.backups
         )
         write_json_atomic(self.workspace.jobs, [job()], self.workspace.backups)
+        write_json_atomic(
+            self.workspace.email_events,
+            [email_event(id="evt_1", createdAt=EVENT_TIME, updatedAt=EVENT_TIME)],
+            self.workspace.backups,
+        )
         self.token = "test-token"
         self.server = create_server(self.workspace, "127.0.0.1", 0, self.token)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.host, self.port = self.server.server_address
+
+    def restart_server(self, email_sync_runner):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.server = create_server(
+            self.workspace,
+            "127.0.0.1",
+            0,
+            self.token,
+            email_sync_runner=email_sync_runner,
+        )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.host, self.port = self.server.server_address
@@ -199,6 +234,120 @@ class ServerTests(unittest.TestCase):
             body={"maxApplications": 99},
         )
         self.assertEqual(denied.status, 404)
+
+    def test_email_routes_require_session_token(self):
+        self.assertEqual(self.request("GET", "/api/email-events").status, 403)
+        self.assertEqual(
+            self.request("POST", "/api/email-sync/run", body={"days": 60}).status,
+            403,
+        )
+
+    def test_email_status_and_summary_redact_mailbox_identity(self):
+        response = self.request("GET", "/api/email-sync/status", token=self.token)
+        self.assertEqual(response.status, 200)
+        payload = json.loads(response.body)
+        self.assertNotIn("mailboxHash", payload)
+        self.assertNotIn("username", payload)
+        summary = json.loads(
+            self.request("GET", "/api/summary", token=self.token).body
+        )
+        self.assertEqual(summary["pendingEmailEvents"], 1)
+
+    def test_sync_is_single_flight(self):
+        runner = BlockingRunner()
+        self.restart_server(runner)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            first = executor.submit(
+                self.request,
+                "POST",
+                "/api/email-sync/run",
+                token=self.token,
+                body={"days": 60},
+            )
+            self.assertTrue(runner.started.wait(timeout=1))
+            second = self.request(
+                "POST",
+                "/api/email-sync/run",
+                token=self.token,
+                body={"days": 60},
+            )
+            self.assertEqual(second.status, 409)
+            runner.release_event.set()
+            self.assertEqual(first.result(timeout=2).status, 200)
+
+    def test_email_event_list_patch_ignore_and_restore(self):
+        listed = self.request("GET", "/api/email-events", token=self.token)
+        self.assertEqual(listed.status, 200)
+        self.assertEqual(len(json.loads(listed.body)["events"]), 1)
+        patched = self.request(
+            "PATCH",
+            "/api/email-events/evt_1",
+            token=self.token,
+            body={"updates": {"title": "Agent 开发"}, "updatedAt": EVENT_TIME},
+        )
+        self.assertEqual(patched.status, 200)
+        patched_event = json.loads(patched.body)["event"]
+        self.assertEqual(patched_event["title"], "Agent 开发")
+        ignored = self.request(
+            "POST",
+            "/api/email-events/evt_1/ignore",
+            token=self.token,
+            body={"ignored": True, "updatedAt": patched_event["updatedAt"]},
+        )
+        self.assertEqual(ignored.status, 200)
+        ignored_event = json.loads(ignored.body)["event"]
+        self.assertEqual(ignored_event["state"], "ignored")
+        restored = self.request(
+            "POST",
+            "/api/email-events/evt_1/ignore",
+            token=self.token,
+            body={"ignored": False, "updatedAt": ignored_event["updatedAt"]},
+        )
+        self.assertEqual(restored.status, 200)
+        self.assertEqual(json.loads(restored.body)["event"]["state"], "pending")
+
+    def test_confirm_rejects_stale_application_version(self):
+        response = self.request(
+            "POST",
+            "/api/email-events/evt_1/confirm",
+            token=self.token,
+            body={
+                "confirmed": True,
+                "applicationId": "app_example",
+                "status": "interview",
+                "updatedAt": EVENT_TIME,
+                "applicationUpdatedAt": "stale",
+            },
+        )
+        self.assertEqual(response.status, 409)
+        self.assertEqual(read_json(self.workspace.applications)[0]["status"], "applied")
+
+    def test_confirm_updates_application_with_email_audit_history(self):
+        response = self.request(
+            "POST",
+            "/api/email-events/evt_1/confirm",
+            token=self.token,
+            body={
+                "confirmed": True,
+                "applicationId": "app_example",
+                "status": "assessment",
+                "updatedAt": EVENT_TIME,
+                "applicationUpdatedAt": application()["updatedAt"],
+            },
+        )
+        self.assertEqual(response.status, 200)
+        updated = read_json(self.workspace.applications)[0]
+        self.assertEqual(updated["status"], "assessment")
+        self.assertEqual(updated["history"][-1]["channel"], "email")
+
+    def test_email_routes_reject_unknown_payload_fields(self):
+        response = self.request(
+            "POST",
+            "/api/email-events/evt_1/ignore",
+            token=self.token,
+            body={"ignored": True, "updatedAt": EVENT_TIME, "secret": "no"},
+        )
+        self.assertEqual(response.status, 400)
 
 
 if __name__ == "__main__":

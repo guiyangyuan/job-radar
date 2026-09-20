@@ -272,4 +272,94 @@ Synthetic valid history event:
 {"schemaVersion": 1, "sourceTiersEnabled": [1, 2, 3, 4], "backupRetention": 20}
 ```
 
-`jobs.json`, `applications.json`, and `company-policies.json` are JSON arrays. `profile.json` is one profile object. Unknown fields, invalid versions, invalid HTTP(S) URLs, invalid dates/timestamps, unsupported statuses, malformed sources/history, and score weights that do not sum to 100 fail validation before canonical writes.
+`jobs.json`, `applications.json`, `company-policies.json`, and `email-events.json` are JSON arrays. `profile.json`, `settings.json`, and `email-sync.json` are objects. Unknown fields, invalid versions, invalid HTTP(S) URLs, invalid dates/timestamps, unsupported statuses, malformed sources/history, and score weights that do not sum to 100 fail validation before canonical writes.
+
+## Email sync state
+
+`email-sync.json` contains synchronization state only. It must never contain a username, full email address, app password, normal password, access token, cookie, body, raw MIME, or attachment.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | integer | Must be `1`. |
+| `provider` | string/null | Resolved provider: `qq`, `netease-163`, `netease-126`, `netease-yeah`, `gmail`, `tencent-enterprise`, `netease-enterprise`, `aliyun-enterprise`, `custom`, or `null` before first sync. `auto` is resolved before persistence. |
+| `mailboxHash` | string/null | `sha256:` followed by 64 lowercase hex characters; never the address. |
+| `folder` | string | Selected read-only folder; defaults to `INBOX`. |
+| `initialWindowDays` | integer | Positive bounded lookback used for the initial/reset sync. |
+| `uidValidity` | integer/null | Non-negative IMAP UIDVALIDITY cursor namespace. |
+| `lastSeenUid` | integer/null | Last fully processed non-negative UID. |
+| `lastSyncedAt` | timestamp/null | Most recent completed synchronization time. |
+
+Synthetic valid sync state:
+
+```json
+{
+  "schemaVersion": 1,
+  "provider": "qq",
+  "mailboxHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "folder": "INBOX",
+  "initialWindowDays": 60,
+  "uidValidity": 7,
+  "lastSeenUid": 42,
+  "lastSyncedAt": "2026-08-25T10:00:00+08:00"
+}
+```
+
+## Email event
+
+`email-events.json` stores minimized, reviewable proposals. It never stores a full body, full sender address, raw Message-ID, raw MIME, attachment, credential, or remote-resource content.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | integer | Must be `1`. |
+| `id` | string | Stable local `evt_…` identifier. |
+| `messageKeyHash` | string | `sha256:` plus 64 lowercase hex characters derived from mailbox hash and IMAP identity. |
+| `receivedAt` | timestamp | Message receipt time. |
+| `senderDomain` | string/null | Domain only, never the local-part/full address. |
+| `subjectSummary` | string/null | Short decoded subject summary. |
+| `company` | string/null | Explicitly extracted or user-corrected employer. |
+| `title` | string/null | Explicitly extracted or user-corrected role. |
+| `proposedStatus` | string/null | One supported application status or `null`. |
+| `interviewStage` | string/null | Optional interview label. |
+| `nextAction` | string/null | Proposed follow-up action. |
+| `nextActionAt` | timestamp/null | Explicitly parsed action deadline. |
+| `classification` | string | `actionable`, `incomplete`, `conflict`, or `irrelevant`. |
+| `confidence` | number | Deterministic value from `0.0` through `1.0`. |
+| `reasons` | string[] | Non-empty explainable rule/match reasons. |
+| `matchedApplicationId` | string/null | Unique canonical application match, if any. |
+| `state` | string | `pending`, `confirmed`, `ignored`, or `error`. |
+| `createdAt` | timestamp | Event creation time. |
+| `updatedAt` | timestamp | Optimistic concurrency version. |
+| `processedAt` | timestamp/null | Confirmation/ignore/error processing time. |
+
+Synthetic valid email event:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "evt_fictional_assessment",
+  "messageKeyHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "receivedAt": "2026-08-25T09:30:00+08:00",
+  "senderDomain": "jobs.example.com",
+  "subjectSummary": "在线测评邀请",
+  "company": "星河软件实验室",
+  "title": "AI 应用开发工程师",
+  "proposedStatus": "assessment",
+  "interviewStage": null,
+  "nextAction": "完成在线测评",
+  "nextActionAt": "2026-08-30T23:59:00+08:00",
+  "classification": "actionable",
+  "confidence": 0.85,
+  "reasons": ["检测到明确的 assessment 阶段证据", "通过公司和岗位名称匹配到投递记录"],
+  "matchedApplicationId": "17947c46-5ac6-46f8-a461-4fce99be18cd",
+  "state": "pending",
+  "createdAt": "2026-08-25T10:00:00+08:00",
+  "updatedAt": "2026-08-25T10:00:00+08:00",
+  "processedAt": null
+}
+```
+
+Events are proposals, not application history. A pending event does not change `applications.json`. Confirmation requires an exact event `updatedAt`, the exact application version when matched, explicit user consent, and a final supported status. A confirmed change appends an application history event with `channel: "email"`.
+
+## Email privacy export rule
+
+`export --privacy` removes `emailSync` entirely and exports an empty `emailEvents` collection. It also removes private application notes, evidence links, and their historical copies. A nonprivacy local snapshot may contain minimized email metadata and must not be published by default.

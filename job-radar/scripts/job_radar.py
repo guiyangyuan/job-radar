@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,6 +19,24 @@ from job_radar_lib.applications import (
     update_application,
 )
 from job_radar_lib.links import migrate_legacy_link
+from job_radar_lib.email_classification import classify_message
+from job_radar_lib.email_events import (
+    EventConflict,
+    EventNotFound,
+    build_error_event,
+    build_event,
+    merge_events,
+)
+from job_radar_lib.email_models import (
+    validate_email_events,
+    validate_email_sync_state,
+)
+from job_radar_lib.imap_sync import (
+    EmailSyncError,
+    ImapConfig,
+    sync_messages,
+    test_connection as test_email_connection,
+)
 from job_radar_lib.merge import merge_jobs
 from job_radar_lib.models import (
     APPLICATION_STATUSES,
@@ -36,6 +55,7 @@ from job_radar_lib.storage import (
     initialize_workspace,
     load_workspace,
     read_json,
+    write_json_bundle_atomic,
     write_json_atomic,
 )
 
@@ -90,6 +110,8 @@ def command_init(args) -> int:
 def command_validate(args) -> int:
     workspace = _workspace(args.workspace)
     profile, jobs, applications, company_policies, _settings = _read_canonical(workspace)
+    email_state = validate_email_sync_state(read_json(workspace.email_sync))
+    email_events = validate_email_events(read_json(workspace.email_events))
     _print_json(
         {
             "valid": True,
@@ -97,6 +119,8 @@ def command_validate(args) -> int:
             "jobs": len(jobs),
             "applications": len(applications),
             "companyPolicies": len(company_policies),
+            "emailEvents": len(email_events),
+            "emailConfigured": email_state.get("provider") is not None,
         }
     )
     return 0
@@ -310,6 +334,108 @@ def command_summary(args) -> int:
     return 0
 
 
+def _read_email(workspace):
+    state = validate_email_sync_state(read_json(workspace.email_sync))
+    events = validate_email_events(read_json(workspace.email_events))
+    return state, events
+
+
+def command_email_test(args) -> int:
+    workspace = _workspace(args.workspace)
+    _read_canonical(workspace)
+    config = ImapConfig.from_env(os.environ)
+    _print_json(test_email_connection(config))
+    return 0
+
+
+def run_email_sync(
+    workspace,
+    days: int,
+    now: datetime,
+    *,
+    env=None,
+) -> dict:
+    _profile, jobs, applications, _policies, _settings = _read_canonical(workspace)
+    state, existing_events = _read_email(workspace)
+    config = ImapConfig.from_env(os.environ if env is None else env)
+    batch = sync_messages(config, state, now, days=days)
+    mailbox_hash = batch.state.get("mailboxHash") or config.mailbox_hash
+    incoming = [
+        build_event(
+            message,
+            classify_message(message, now),
+            mailbox_hash,
+            jobs,
+            applications,
+            now,
+        )
+        for message in batch.messages
+    ]
+    incoming.extend(
+        build_error_event(issue, mailbox_hash, now) for issue in batch.issues
+    )
+    merged, merge_stats = merge_events(existing_events, incoming)
+    write_json_bundle_atomic(
+        {
+            workspace.email_sync: batch.state,
+            workspace.email_events: merged,
+        },
+        workspace.backups,
+    )
+    classifications = Counter(event["classification"] for event in incoming)
+    return {
+        "fetched": len(batch.messages),
+        "issues": len(batch.issues),
+        "added": merge_stats["added"],
+        "updated": merge_stats["updated"],
+        "unchanged": merge_stats["unchanged"],
+        "actionable": classifications.get("actionable", 0),
+        "incomplete": classifications.get("incomplete", 0),
+        "conflict": classifications.get("conflict", 0),
+        "irrelevant": classifications.get("irrelevant", 0),
+    }
+
+
+def command_email_sync(args) -> int:
+    workspace = _workspace(args.workspace)
+    _print_json(run_email_sync(workspace, args.days, _now()))
+    return 0
+
+
+def _email_summary(applications: list[dict], state: dict, events: list[dict]) -> dict:
+    states = Counter(event["state"] for event in events)
+    classifications = Counter(event["classification"] for event in events)
+    return {
+        "emailEvents": {
+            "total": len(events),
+            **dict(sorted(states.items())),
+            "classifications": dict(sorted(classifications.items())),
+        },
+        "applications": dict(
+            sorted(Counter(item["status"] for item in applications).items())
+        ),
+        "lastSyncedAt": state.get("lastSyncedAt"),
+    }
+
+
+def command_email_summary(args) -> int:
+    workspace = _workspace(args.workspace)
+    _profile, _jobs, applications, _policies, _settings = _read_canonical(workspace)
+    state, events = _read_email(workspace)
+    summary = _email_summary(applications, state, events)
+    if args.json:
+        _print_json(summary)
+    else:
+        print(
+            f"邮件待确认 {summary['emailEvents'].get('pending', 0)} 条，"
+            f"正式投递 {sum(summary['applications'].values())} 条"
+        )
+        print(f"- 上次同步: {summary['lastSyncedAt'] or '尚未同步'}")
+        for classification, count in summary["emailEvents"]["classifications"].items():
+            print(f"- {classification}: {count}")
+    return 0
+
+
 def command_serve(args) -> int:
     workspace = _workspace(args.workspace)
     _read_canonical(workspace)
@@ -319,6 +445,16 @@ def command_serve(args) -> int:
 
 def _workspace_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", required=True, help="Job Radar 数据目录")
+
+
+def _email_days(value: str) -> int:
+    try:
+        days = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("days must be an integer from 1 to 3650") from exc
+    if not 1 <= days <= 3650:
+        raise argparse.ArgumentTypeError("days must be an integer from 1 to 3650")
+    return days
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -392,6 +528,22 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--json", action="store_true")
     summary.set_defaults(handler=command_summary)
 
+    email_test = commands.add_parser("email-test", help="验证只读 IMAP 连接")
+    _workspace_argument(email_test)
+    email_test.set_defaults(handler=command_email_test)
+
+    email_sync = commands.add_parser("email-sync", help="同步招聘邮件到待确认队列")
+    _workspace_argument(email_sync)
+    email_sync.add_argument("--days", type=_email_days, default=60)
+    email_sync.set_defaults(handler=command_email_sync)
+
+    email_summary = commands.add_parser(
+        "email-summary", help="分开汇总邮件建议与正式投递状态"
+    )
+    _workspace_argument(email_summary)
+    email_summary.add_argument("--json", action="store_true")
+    email_summary.set_defaults(handler=command_email_summary)
+
     serve_command = commands.add_parser("serve", help="启动本机可编辑工作台")
     _workspace_argument(serve_command)
     serve_command.add_argument("--port", type=int, default=0)
@@ -405,13 +557,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.handler(args)
-    except (ApplicationConflict, WorkspaceConflict) as exc:
+    except (ApplicationConflict, EventConflict, WorkspaceConflict) as exc:
         print(f"conflict: {exc}", file=sys.stderr)
         return 3
     except (
         ValidationError,
         FileNotFoundError,
         ApplicationNotFound,
+        EventNotFound,
+        EmailSyncError,
         ValueError,
         json.JSONDecodeError,
     ) as exc:

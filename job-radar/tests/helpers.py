@@ -165,3 +165,60 @@ def sample_data(**overrides):
         "companyPolicies": [],
         "generatedAt": "2026-08-21T10:00:00+08:00",
     }
+def email_sync_state(**overrides):
+    value = {
+        "schemaVersion": 1,
+        "provider": "qq",
+        "mailboxHash": "sha256:" + "a" * 64,
+        "folder": "INBOX",
+        "initialWindowDays": 60,
+        "uidValidity": 7,
+        "lastSeenUid": 42,
+        "lastSyncedAt": "2026-08-21T10:00:00+08:00",
+    }
+    value.update(overrides)
+    return value
+
+
+def email_event(**overrides):
+    value = {
+        "schemaVersion": 1,
+        "id": "evt_example",
+        "messageKeyHash": "sha256:" + "b" * 64,
+        "receivedAt": "2026-08-21T09:30:00+08:00",
+        "senderDomain": "jobs.example.com",
+        "subjectSummary": "在线测评邀请",
+        "company": "示例科技",
+        "title": "AI 应用开发工程师",
+        "proposedStatus": "assessment",
+        "interviewStage": None,
+        "nextAction": "完成在线测评",
+        "nextActionAt": "2026-08-25T23:59:00+08:00",
+        "classification": "actionable",
+        "confidence": 0.85,
+        "reasons": ["检测到明确的在线测评邀请"],
+        "matchedApplicationId": "app_example",
+        "state": "pending",
+        "createdAt": "2026-08-21T10:00:00+08:00",
+        "updatedAt": "2026-08-21T10:00:00+08:00",
+        "processedAt": None,
+    }
+    value.update(overrides)
+    return value
+
+
+def sample_data_with_email(**overrides):
+    value = sample_data(**overrides)
+    value["emailSync"] = email_sync_state()
+    value["emailEvents"] = [
+        email_event(
+            subjectSummary="技术面试邀请",
+            senderDomain="jobs.example.com",
+            proposedStatus="interview",
+            interviewStage="技术一面",
+            nextAction="参加技术一面",
+            classification="conflict",
+            reasons=["状态冲突，需要人工确认"],
+        )
+    ]
+    return value

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from .applications import (
@@ -19,6 +20,15 @@ from .applications import (
     create_application,
     update_application,
 )
+from .email_events import (
+    EventConflict,
+    EventNotFound,
+    confirm_event,
+    patch_event,
+    set_event_ignored,
+)
+from .email_models import validate_email_events, validate_email_sync_state
+from .imap_sync import EmailSyncError
 from .models import ValidationError, validate_job
 from .rendering import render_dashboard, write_export
 from .storage import Workspace, WorkspaceConflict, read_json, write_json_atomic
@@ -43,6 +53,17 @@ class ServerConfig:
     port: int
     token: str
     lock: threading.RLock = field(default_factory=threading.RLock)
+    email_sync_lock: threading.Lock = field(default_factory=threading.Lock)
+    email_sync_runner: Callable[[Workspace, int], dict] | None = None
+
+
+def _default_email_sync_runner(workspace: Workspace, days: int) -> dict:
+    # Imported lazily to avoid a module cycle: the CLI imports this server module.
+    import job_radar
+
+    return job_radar.run_email_sync(
+        workspace, days, datetime.now(timezone.utc)
+    )
 
 
 def _find_index(records: list[dict], record_id: str) -> int:
@@ -146,17 +167,28 @@ def _handler_factory(config: ServerConfig):
             return value
 
         def _dashboard_data(self) -> dict:
+            email_sync = validate_email_sync_state(
+                read_json(config.workspace.email_sync)
+            )
+            email_events = validate_email_events(
+                read_json(config.workspace.email_events)
+            )
             return {
                 "profile": read_json(config.workspace.profile),
                 "jobs": read_json(config.workspace.jobs),
                 "applications": read_json(config.workspace.applications),
                 "companyPolicies": read_json(config.workspace.company_policies),
+                "emailSync": email_sync,
+                "emailEvents": email_events,
                 "generatedAt": datetime.now(timezone.utc).isoformat(),
             }
 
         def _summary(self) -> dict:
             jobs = read_json(config.workspace.jobs)
             applications = read_json(config.workspace.applications)
+            email_events = validate_email_events(
+                read_json(config.workspace.email_events)
+            )
             active = {"screening", "assessment", "interview"}
             return {
                 "jobs": len(jobs),
@@ -166,7 +198,107 @@ def _handler_factory(config: ServerConfig):
                 "active": sum(item.get("status") in active for item in applications),
                 "interviews": sum(item.get("status") == "interview" for item in applications),
                 "offers": sum(item.get("status") == "offer" for item in applications),
+                "pendingEmailEvents": sum(
+                    item.get("state") == "pending" for item in email_events
+                ),
             }
+
+        def _email_status(self):
+            state = validate_email_sync_state(read_json(config.workspace.email_sync))
+            self._send_json(
+                200,
+                {
+                    "provider": state.get("provider"),
+                    "folder": state["folder"],
+                    "initialWindowDays": state["initialWindowDays"],
+                    "lastSyncedAt": state.get("lastSyncedAt"),
+                    "readonly": True,
+                },
+            )
+
+        def _email_events(self):
+            events = validate_email_events(read_json(config.workspace.email_events))
+            self._send_json(200, {"events": events})
+
+        def _run_email_sync(self, payload: dict):
+            if set(payload) - {"days"}:
+                raise ValueError("email sync accepts only a days field")
+            days = payload.get("days", 60)
+            if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 3650:
+                raise ValueError("days must be an integer from 1 to 3650")
+            if not config.email_sync_lock.acquire(blocking=False):
+                raise EventConflict("email sync is already running")
+            try:
+                runner = config.email_sync_runner or _default_email_sync_runner
+                with config.lock:
+                    result = runner(config.workspace, days)
+                if not isinstance(result, dict):
+                    raise ValueError("email sync runner returned an invalid result")
+                self._send_json(200, result)
+            finally:
+                config.email_sync_lock.release()
+
+        def _patch_email_event(self, event_id: str, payload: dict):
+            if "updates" in payload:
+                if set(payload) - {"updates", "updatedAt"}:
+                    raise ValueError("unknown email event patch fields")
+                updates = payload.get("updates")
+            else:
+                updates = {
+                    key: value for key, value in payload.items() if key != "updatedAt"
+                }
+            if not isinstance(updates, dict):
+                raise ValueError("email event updates must be an object")
+            expected = payload.get("updatedAt")
+            if not isinstance(expected, str) or not expected:
+                raise ValueError("updatedAt is required")
+            with config.lock:
+                events = validate_email_events(
+                    read_json(config.workspace.email_events)
+                )
+                index = _find_index(events, event_id)
+                updated = patch_event(
+                    events[index],
+                    updates,
+                    datetime.now(timezone.utc),
+                    expected,
+                )
+                events[index] = updated
+                write_json_atomic(
+                    config.workspace.email_events,
+                    events,
+                    config.workspace.backups,
+                )
+            self._send_json(200, {"event": updated})
+
+        def _confirm_email_event(self, event_id: str, payload: dict):
+            with config.lock:
+                result = confirm_event(
+                    event_id,
+                    payload,
+                    config.workspace,
+                    datetime.now(timezone.utc),
+                )
+            self._send_json(200, result)
+
+        def _ignore_email_event(self, event_id: str, payload: dict):
+            if set(payload) != {"ignored", "updatedAt"}:
+                raise ValueError(
+                    "ignore accepts exactly ignored and updatedAt fields"
+                )
+            if not isinstance(payload["ignored"], bool):
+                raise ValueError("ignored must be boolean")
+            if not isinstance(payload["updatedAt"], str) or not payload["updatedAt"]:
+                raise ValueError("updatedAt is required")
+            with config.lock:
+                updated = set_event_ignored(
+                    event_id,
+                    payload["ignored"],
+                    config.workspace,
+                    datetime.now(timezone.utc),
+                    expected_updated_at=payload["updatedAt"],
+                )
+            self._send_json(200, {"event": updated})
 
         def _patch_application(self, application_id: str, payload: dict):
             if "updates" in payload:
@@ -293,6 +425,44 @@ def _handler_factory(config: ServerConfig):
                         )
                     },
                 )
+            elif method == "GET" and path == "/api/email-sync/status":
+                self._email_status()
+            elif method == "GET" and path == "/api/email-events":
+                self._email_events()
+            elif method == "POST" and path == "/api/email-sync/run":
+                self._run_email_sync(self._read_json())
+            elif method == "PATCH" and path.startswith("/api/email-events/"):
+                event_id = unquote(path.removeprefix("/api/email-events/"))
+                if not event_id or "/" in event_id:
+                    self._error(404, "route not found")
+                else:
+                    self._patch_email_event(event_id, self._read_json())
+            elif (
+                method == "POST"
+                and path.startswith("/api/email-events/")
+                and path.endswith("/confirm")
+            ):
+                encoded_id = path.removeprefix("/api/email-events/").removesuffix(
+                    "/confirm"
+                )
+                event_id = unquote(encoded_id)
+                if not event_id or "/" in event_id:
+                    self._error(404, "route not found")
+                else:
+                    self._confirm_email_event(event_id, self._read_json())
+            elif (
+                method == "POST"
+                and path.startswith("/api/email-events/")
+                and path.endswith("/ignore")
+            ):
+                encoded_id = path.removeprefix("/api/email-events/").removesuffix(
+                    "/ignore"
+                )
+                event_id = unquote(encoded_id)
+                if not event_id or "/" in event_id:
+                    self._error(404, "route not found")
+                else:
+                    self._ignore_email_event(event_id, self._read_json())
             elif method == "PATCH" and path.startswith("/api/jobs/"):
                 self._patch_job(unquote(path.removeprefix("/api/jobs/")), self._read_json())
             elif method == "PATCH" and path.startswith("/api/applications/"):
@@ -319,11 +489,17 @@ def _handler_factory(config: ServerConfig):
                 self._dispatch(method)
             except PayloadTooLarge as exc:
                 self._error(413, str(exc))
-            except (ApplicationConflict, WorkspaceConflict) as exc:
+            except (ApplicationConflict, EventConflict, WorkspaceConflict) as exc:
                 self._error(409, str(exc))
-            except ApplicationNotFound as exc:
+            except (ApplicationNotFound, EventNotFound) as exc:
                 self._error(404, str(exc))
-            except (ValidationError, ValueError, KeyError, TypeError) as exc:
+            except (
+                EmailSyncError,
+                ValidationError,
+                ValueError,
+                KeyError,
+                TypeError,
+            ) as exc:
                 self._error(400, str(exc))
             except Exception:
                 self._error(500, "internal server error")
@@ -348,6 +524,8 @@ def create_server(
     host: str = "127.0.0.1",
     port: int = 0,
     token: str | None = None,
+    *,
+    email_sync_runner: Callable[[Workspace, int], dict] | None = None,
 ) -> ThreadingHTTPServer:
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("Job Radar only permits a loopback host")
@@ -356,7 +534,13 @@ def create_server(
     session_token = token or secrets.token_urlsafe(32)
     if not session_token:
         raise ValueError("session token cannot be empty")
-    config = ServerConfig(workspace=workspace, host=host, port=port, token=session_token)
+    config = ServerConfig(
+        workspace=workspace,
+        host=host,
+        port=port,
+        token=session_token,
+        email_sync_runner=email_sync_runner,
+    )
     server = ThreadingHTTPServer((host, port), _handler_factory(config))
     server.daemon_threads = True
     config.port = server.server_port
